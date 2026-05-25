@@ -606,7 +606,7 @@ export default function TikTokDashboard() {
                 <input
                   type="range"
                   min="0.5"
-                  max="1.5"
+                  max="3.0"
                   step="0.1"
                   value={logoScale}
                   onChange={(e) => setLogoScale(parseFloat(e.target.value))}
