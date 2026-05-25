@@ -55,6 +55,7 @@ export default function TikTokDashboard() {
   const [backgroundColor, setBackgroundColor] = useState("#FFFFFF");
   const [frameStyle, setFrameStyle] = useState<BrandingOptions["frameStyle"]>("minimalist-corners");
   const [frameColor, setFrameColor] = useState("#FF4E00"); // สีส้มแบรนดิ้งพรีเมียม
+  const [customFrameFile, setCustomFrameFile] = useState<File | null>(null);
 
   // --- ข้อมูลที่แนะนำโดย AI Gemini ---
   const [aiContent, setAiContent] = useState<{
@@ -210,7 +211,8 @@ export default function TikTokDashboard() {
         frameColor,
         logoFile,
         logoText,
-        logoScale
+        logoScale,
+        customFrameFile
       };
 
       // ใส่กรอบภาพหลักแบบขนาน
@@ -505,6 +507,7 @@ export default function TikTokDashboard() {
                   <option value="minimalist-corners">ขอบมุมมินิมอลแบบเรืองแสง</option>
                   <option value="elegant-double">ขอบคู่แบบหรูหรา</option>
                   <option value="clean-border">ขอบทึบสไตล์โมเดิร์น</option>
+                  <option value="custom-image">อัปโหลดกรอบรูปแบรนด์ส่วนตัว (.png)</option>
                 </select>
               </div>
 
@@ -514,18 +517,50 @@ export default function TikTokDashboard() {
                 <div className="flex gap-2">
                   <input
                     type="color"
+                    disabled={frameStyle === "custom-image"}
                     value={frameColor}
                     onChange={(e) => setFrameColor(e.target.value)}
-                    className="w-10 h-10 p-0 rounded-lg bg-transparent border border-slate-200 cursor-pointer"
+                    className="w-10 h-10 p-0 rounded-lg bg-transparent border border-slate-200 cursor-pointer disabled:opacity-50"
                   />
                   <input
                     type="text"
-                    value={frameColor}
+                    disabled={frameStyle === "custom-image"}
+                    value={frameStyle === "custom-image" ? "ใช้กรอบรูปภาพแบรนดิ้ง" : frameColor}
                     onChange={(e) => setFrameColor(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-lg bg-white border border-slate-200 text-xs focus:outline-none focus:border-indigo-500 text-slate-700"
+                    className="flex-1 px-3 py-2 rounded-lg bg-white border border-slate-200 text-xs focus:outline-none focus:border-indigo-500 text-slate-700 disabled:bg-slate-50 disabled:text-slate-400"
                   />
                 </div>
               </div>
+
+              {/* ช่องอัปโหลดไฟล์กรอบรูปภาพแบรนด์ส่วนตัว PNG */}
+              {frameStyle === "custom-image" && (
+                <div className="md:col-span-2 p-4 rounded-xl border border-orange-200 bg-orange-50/20">
+                  <label className="block text-xs font-bold text-orange-700 mb-2">อัปโหลดไฟล์กรอบรูปภาพแบรนด์ของคุณ (ไฟล์ PNG โปร่งแสง ขนาด 1:1 แนะนำ 1000x1000px)</label>
+                  <div className="flex gap-3 items-center">
+                    <label className="px-4 py-2.5 rounded-lg border border-orange-200 hover:bg-orange-50 bg-white cursor-pointer text-xs font-bold text-orange-700 text-center flex-1 transition shadow-sm">
+                      เลือกไฟล์กรอบภาพ PNG
+                      <input
+                        type="file"
+                        accept="image/png"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setCustomFrameFile(e.target.files[0]);
+                            setToast({ type: "success", message: "อัปโหลดไฟล์กรอบรูปแบรนด์ส่วนตัวเรียบร้อยแล้ว" });
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                    {customFrameFile ? (
+                      <div className="text-xs text-emerald-600 flex items-center gap-1.5 font-bold">
+                        <CheckCircle className="w-4 h-4" /> {customFrameFile.name}
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-slate-500 font-semibold">ยังไม่ได้เลือกไฟล์กรอบรูป</span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* ข้อความโลโก้แบบกล่อง */}
               <div>

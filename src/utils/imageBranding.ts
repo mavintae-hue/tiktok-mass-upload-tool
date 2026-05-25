@@ -1,11 +1,12 @@
 export interface BrandingOptions {
   aspectMode: "cover" | "contain";
   backgroundColor: string;
-  frameStyle: "none" | "minimalist-corners" | "elegant-double" | "clean-border";
+  frameStyle: "none" | "minimalist-corners" | "elegant-double" | "clean-border" | "custom-image";
   frameColor: string;
   logoFile: File | null;
   logoText: string;
   logoScale: number; // 0.5 to 1.5 multiplier
+  customFrameFile?: File | null;
 }
 
 /**
@@ -91,7 +92,20 @@ export async function processBrandedImage(
 
   const inset = 16; // Inset from canvas edges
 
-  if (options.frameStyle === "clean-border") {
+  if (options.frameStyle === "custom-image" && options.customFrameFile) {
+    try {
+      const frameUrl = URL.createObjectURL(options.customFrameFile);
+      const frameImg = await loadImage(frameUrl);
+      ctx.drawImage(frameImg, 0, 0, 1000, 1000);
+      URL.revokeObjectURL(frameUrl);
+    } catch (err) {
+      console.error("Failed to render custom uploaded frame image. Falling back to solid border.", err);
+      // Fallback
+      ctx.strokeStyle = options.frameColor;
+      ctx.lineWidth = 12;
+      ctx.strokeRect(inset, inset, 1000 - inset * 2, 1000 - inset * 2);
+    }
+  } else if (options.frameStyle === "clean-border") {
     // Standard sleek corporate frame
     ctx.lineWidth = 12;
     ctx.strokeRect(inset, inset, 1000 - inset * 2, 1000 - inset * 2);
