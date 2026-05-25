@@ -24,20 +24,20 @@ export async function POST(req: Request) {
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const prompt = `
-You are a expert e-commerce copywriter specializing in TikTok Shop SEO and conversion optimization.
-For the product name: "${productName}", generate a structured JSON object containing high-converting TikTok product listing details.
+คุณคือผู้เชี่ยวชาญด้าน E-commerce Copywriting และการตลาดดิจิทัลบน TikTok Shop, Shopee และ Lazada หน้าที่ของคุณคือเขียน "คำอธิบายรายละเอียดสินค้า (Product Description)" เป็นภาษาไทยให้ออกมาน่าดึงดูด กระตุ้นยอดขาย (Conversion) อ่านง่าย และถูกต้องตามกฎของแพลตฟอร์มปี 2026 อย่างเคร่งครัด
+กรุณาเขียนคำอธิบายสินค้าตามข้อมูลดิบของชื่อสินค้าที่กำหนดให้ดังนี้: "${productName}" โดยให้ยึดรูปแบบและข้อกำหนดดังต่อไปนี้อย่างเคร่งครัด
+
+🚨 ข้อกำหนดสำคัญด้านกฎระเบียบ (ห้ามละเมิดเด็ดขาด):
+- ห้ามใช้คำโฆษณาเกินจริง (Overclaim) หรือคำที่เสี่ยงผิดนโยบาย เช่น "ดีที่สุด", "รับประกันผลลัพธ์", "รักษาโรค", "ลดโรค", "เห็นผล 100%", "ธรรมชาติ 100%" หรือใช้คำเปรียบเทียบโจมตีแบรนด์อื่น เช่น "vs"
+- เขียนเนื้อหาให้ดูเป็นธรรมชาติ สละสลวย ใช้ภาษาพ่อค้าแม่ค้าออนไลน์ที่ดูมืออาชีพ น่าเชื่อถือ และใช้อีโมจิประกอบให้น่าอ่าน แต่อย่าใส่เยอะจนรก
+- จัดหน้าเว้นบรรทัดให้โปร่งตา ใช้จุดไข่ปลา (Bullet points) ห้ามเขียนข้อความเรียงติดกันเป็นประโยคยาวๆ เป็นพืด
 
 You MUST return a JSON object matching this exact structure:
 {
-  "tiktok_title": "A catchy, high-SEO-value product title between 25-80 characters containing: [Brand Name placeholder] + [Key ingredient/feature] + [Product Type]",
-  "description": "A list of bullet points strictly formatted as: \\n1) Main Ingredients: [details...], \\n2) How to use: [details...], \\n3) Target Demographics: [details...]",
+  "tiktok_title": "ชื่อสินค้าเน้นการทำ SEO ความยาวไม่เกิน 255 ตัวอักษร โดยเรียงโครงสร้างดังนี้: [โปรโมชั่น/แพ็คไซส์] + ชื่อแบรนด์ (ไทยและอังกฤษ) + ชื่อสินค้า (ไทยและอังกฤษ) + สูตร/สี + ขนาด/ปริมาตร เพื่อดักคำค้นหาจากลูกค้าทั้งสองภาษาให้ครอบคลุมที่สุด",
+  "description": "คำอธิบายสินค้าภาษาไทยตามรูปแบบด้านล่าง แยกย่อหน้าด้วยเครื่องหมายขึ้นบรรทัดใหม่ (\\n):\n\n🔥 [คำโปรยเปิดหัว Hook สั้น กระชับ ดึงดูดใจ เร้าความสนใจของลูกค้าทันทีใน 3 วินาทีแรก]\n\n📌 **รายละเอียดสินค้า / สูตร / สี**\n- [บอกคุณสมบัติเด่นและเหมาะสำหรับใครให้ชัดเจนแบบ Bullet points]\n- [แทรกรูปภาพอธิบายคุณสมบัติสินค้า/เนื้อสัมผัส ที่นี่] (ใช้ข้อความนี้เป๊ะๆ เป็นไกด์ไลน์บอกจุดลงรูป)\n\n💖 **ทำไมต้องเลือกสินค้านี้?**\n- [สรุปจุดเด่นความคุ้มค่า 4-5 ข้อเป็น Bullet points สั้นๆ กระตุ้นความอยากซื้อ]\n\n💡 **วิธีใช้ และ ข้อมูลสำคัญ**\n- วิธีใช้: [อธิบายวิธีใช้สั้นๆ]\n- ข้อมูลเพิ่มเติม: ขนาด/ปริมาณ และการรับประกันของแท้ 100% (ห้ามเคลมสรรพคุณเกินจริง) พร้อมรับประกันการแพ็คจัดส่งอย่างดี\n\n🎯 **SEO & Keywords**\n[เลือกกลุ่มแฮชแท็ก # ที่เกี่ยวข้องกับสินค้า แบรนด์ และคำค้นหายอดนิยมมา 5-8 แฮชแท็ก]",
   "market_price_analysis": "A brief, professional 2-3 sentence paragraph summarizing estimated online competitor pricing brackets and strategies for this type of product to help the seller set a competitive retail price."
 }
-
-Rules for the content:
-- "tiktok_title": Must be extremely catchy, use caps strategically for key selling points, and be optimized for TikTok search queries. Keep it strictly between 25 and 80 characters.
-- "description": Use Thai language if the product name contains Thai, or English if it's in English. Provide clear, direct information, highly scannable on mobile screens.
-- Avoid using markdown styling inside the JSON string properties.
 `;
 
     let responseText = "";
