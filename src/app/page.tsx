@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import Link from "next/link";
+
 import {
   Upload,
   Sparkles,
@@ -390,8 +392,16 @@ export default function TikTokDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-4 text-xs text-slate-400">
+            <Link
+              href="/gps-tracker"
+              className="text-xs bg-slate-800/80 border border-slate-700 hover:bg-indigo-600/10 hover:border-indigo-500/50 px-3.5 py-2 rounded-xl transition duration-300 flex items-center gap-1.5 font-semibold text-slate-300 hover:text-indigo-400 shadow-md shadow-black/10"
+            >
+              🛰️ Sales GPS Tracker
+            </Link>
+            <div className="h-4 w-px bg-slate-800"></div>
             <span>Server Direct Route: <strong className="text-orange-400">192.168.1.221</strong></span>
           </div>
+
         </div>
       </header>
 
