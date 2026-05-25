@@ -197,10 +197,8 @@ function drawTextLogo(
 ) {
   const brandName = text.trim() || "STORE BRAND";
   
-  // Background badge block (sleek dark glass or colored block)
+  // Background badge block (sleek borderless dark glass)
   ctx.fillStyle = "rgba(11, 15, 25, 0.85)";
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-  ctx.lineWidth = 1.5;
   
   // Rounded rectangle path for the logo badge
   const radius = 6;
@@ -216,7 +214,6 @@ function drawTextLogo(
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.closePath();
   ctx.fill();
-  ctx.stroke();
 
   // Logo text styling (sleek modern typography)
   ctx.fillStyle = "#FFFFFF";

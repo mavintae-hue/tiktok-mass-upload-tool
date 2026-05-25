@@ -23,14 +23,6 @@ export async function POST(req: Request) {
     // Initialize Gemini API client
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // Use gemini-1.5-flash as requested
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
-    });
-
     const prompt = `
 You are a expert e-commerce copywriter specializing in TikTok Shop SEO and conversion optimization.
 For the product name: "${productName}", generate a structured JSON object containing high-converting TikTok product listing details.
@@ -48,8 +40,36 @@ Rules for the content:
 - Avoid using markdown styling inside the JSON string properties.
 `;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    let responseText = "";
+    try {
+      // 1. Try modern Gemini 2.5 Flash first
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        generationConfig: { responseMimeType: "application/json" },
+      });
+      const result = await model.generateContent(prompt);
+      responseText = result.response.text();
+    } catch (err25) {
+      console.warn("Gemini 2.5 Flash failed, trying 1.5 Flash...", err25);
+      try {
+        // 2. Fallback to Gemini 1.5 Flash
+        const model15 = genAI.getGenerativeModel({
+          model: "gemini-1.5-flash",
+          generationConfig: { responseMimeType: "application/json" },
+        });
+        const result = await model15.generateContent(prompt);
+        responseText = result.response.text();
+      } catch (err15) {
+        console.warn("Gemini 1.5 Flash failed, trying 1.5 Pro...", err15);
+        // 3. Fallback to Gemini 1.5 Pro
+        const modelPro = genAI.getGenerativeModel({
+          model: "gemini-1.5-pro",
+          generationConfig: { responseMimeType: "application/json" },
+        });
+        const result = await modelPro.generateContent(prompt);
+        responseText = result.response.text();
+      }
+    }
 
     if (!responseText) {
       throw new Error("Received empty response from Gemini API.");
