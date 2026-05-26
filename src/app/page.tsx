@@ -814,7 +814,7 @@ export default function TikTokDashboard() {
                 <div>
                   <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">รายละเอียดสินค้า (แบ่งเป็นหัวข้ออ่านง่าย)</label>
                   <textarea
-                    rows={4}
+                    rows={12}
                     value={aiContent.description}
                     onChange={(e) => setAiContent({ ...aiContent, description: e.target.value })}
                     className="w-full px-3.5 py-2.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-700 leading-relaxed focus:outline-none font-sans font-semibold"
