@@ -5,7 +5,10 @@ import * as XLSX from "xlsx";
 
 // Path to the Excel file and cached JSON file
 const EXCEL_FILE_PATH = path.join(process.cwd(), "DT ONLINE_CORE SKU List data as of 17 May'26.xlsx");
-const CACHE_DIR = path.join(process.cwd(), "src", "data");
+
+// Detect serverless environments (like Vercel AWS Lambda) where the workspace is read-only
+const isServerless = typeof process !== "undefined" && (process.env.VERCEL || process.env.NODE_ENV === "production" || process.cwd().includes("var/task"));
+const CACHE_DIR = isServerless ? "/tmp" : path.join(process.cwd(), "src", "data");
 const CACHE_FILE_PATH = path.join(CACHE_DIR, "products.json");
 
 interface ProductItem {
@@ -51,10 +54,24 @@ interface ParsedCache {
   priceChanges: PriceChange[];
 }
 
-// Helper to ensure the cache folder exists
+// Helper to ensure the cache folder exists (fail-safe for read-only environments)
 function ensureCacheDirExists() {
-  if (!fs.existsSync(CACHE_DIR)) {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.warn(`[WARNING] Failed to ensure cache directory: ${CACHE_DIR}. Proceeding with in-memory execution.`, err);
+  }
+}
+
+// Helper to write to JSON cache safely
+function writeToCache(data: ParsedCache) {
+  try {
+    ensureCacheDirExists();
+    fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    console.warn(`[WARNING] Failed to write cache file to: ${CACHE_FILE_PATH}. Cache will be in-memory only.`, err);
   }
 }
 
@@ -224,7 +241,7 @@ export async function GET() {
     if (!cacheData || cacheData.excelMtime !== excelMtime) {
       console.log("Cache is stale or missing. Parsing Excel sheet...");
       cacheData = parseExcelData(cacheData);
-      fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(cacheData, null, 2), "utf-8");
+      writeToCache(cacheData);
     }
 
     return NextResponse.json({
@@ -260,7 +277,7 @@ export async function POST() {
 
     console.log("Forcing manual Excel sync...");
     const freshCache = parseExcelData(cacheData);
-    fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(freshCache, null, 2), "utf-8");
+    writeToCache(freshCache);
 
     return NextResponse.json({
       success: true,
