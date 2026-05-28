@@ -4,9 +4,8 @@ import path from "path";
 import * as XLSX from "xlsx";
 
 // Path to the Excel file and cached JSON file
-const WORKSPACE_DIR = "c:\\Projects\\tiktok-mass-upload-tool";
-const EXCEL_FILE_PATH = path.join(WORKSPACE_DIR, "DT ONLINE_CORE SKU List data as of 17 May'26.xlsx");
-const CACHE_DIR = path.join(WORKSPACE_DIR, "src", "data");
+const EXCEL_FILE_PATH = path.join(process.cwd(), "DT ONLINE_CORE SKU List data as of 17 May'26.xlsx");
+const CACHE_DIR = path.join(process.cwd(), "src", "data");
 const CACHE_FILE_PATH = path.join(CACHE_DIR, "products.json");
 
 interface ProductItem {
