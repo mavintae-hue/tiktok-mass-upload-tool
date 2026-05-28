@@ -43,45 +43,33 @@ You MUST return a JSON object matching this exact structure:
     let responseText = "";
     const errors: string[] = [];
 
-    // 1. Try Gemini 1.5 Flash first (most widely supported and highly reliable standard model)
-    try {
-      const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
-        generationConfig: { responseMimeType: "application/json" },
-      });
-      const result = await model.generateContent(prompt);
-      responseText = result.response.text();
-    } catch (err15) {
-      const errMsg = err15 instanceof Error ? err15.message : String(err15);
-      errors.push(`Gemini 1.5 Flash Error: ${errMsg}`);
-      console.warn("Gemini 1.5 Flash failed, trying 2.5 Flash...", err15);
+    // รายชื่อโมเดลฟรีที่ได้รับการรองรับในระบบ Google AI Studio เพื่อความเสถียร 100%
+    const modelsToTry = [
+      "gemini-2.0-flash",       // โมเดลล่าสุดของปี 2025/2026 ทำงานเร็วมาก โควตาฟรีสูง
+      "gemini-1.5-flash",       // โมเดลมาตรฐานที่นิยมใช้ที่สุด
+      "gemini-1.5-flash-8b",    // โมเดลน้ำหนักเบา 8B มีความเสถียรและทนทานต่อการจำกัดโควตา (Rate Limits)
+      "gemini-2.5-flash",       // โมเดลทดสอบประสิทธิภาพสูง
+      "gemini-1.5-pro"          // โมเดลประมวลผลซับซ้อน (เป็นตัวเลือกสุดท้ายกรณีโมเดลอื่นขัดข้อง)
+    ];
 
-      // 2. Fallback to Gemini 2.5 Flash
+    for (const modelName of modelsToTry) {
       try {
-        const model25 = genAI.getGenerativeModel({
-          model: "gemini-2.5-flash",
+        console.log(`[INFO] Trying Gemini model: ${modelName}...`);
+        const model = genAI.getGenerativeModel({
+          model: modelName,
           generationConfig: { responseMimeType: "application/json" },
         });
-        const result = await model25.generateContent(prompt);
+        const result = await model.generateContent(prompt);
         responseText = result.response.text();
-      } catch (err25) {
-        const errMsg25 = err25 instanceof Error ? err25.message : String(err25);
-        errors.push(`Gemini 2.5 Flash Error: ${errMsg25}`);
-        console.warn("Gemini 2.5 Flash failed, trying 1.5 Pro...", err25);
-
-        // 3. Fallback to Gemini 1.5 Pro (latest exp / stable)
-        try {
-          const modelPro = genAI.getGenerativeModel({
-            model: "gemini-1.5-pro",
-            generationConfig: { responseMimeType: "application/json" },
-          });
-          const result = await modelPro.generateContent(prompt);
-          responseText = result.response.text();
-        } catch (errPro) {
-          const errMsgPro = errPro instanceof Error ? errPro.message : String(errPro);
-          errors.push(`Gemini 1.5 Pro Error: ${errMsgPro}`);
-          console.warn("Gemini 1.5 Pro failed.", errPro);
+        
+        if (responseText) {
+          console.log(`[SUCCESS] Generated listing content using model: ${modelName}`);
+          break; // หยุดวนลูปทันทีเมื่อโมเดลตัวใดตัวหนึ่งตอบกลับข้อมูลสำเร็จ
         }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        errors.push(`${modelName} Error: ${errMsg}`);
+        console.warn(`[WARNING] Gemini model ${modelName} failed. Falling back... Error:`, errMsg);
       }
     }
 
