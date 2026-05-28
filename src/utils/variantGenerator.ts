@@ -86,7 +86,7 @@ export function generateSkuString(
         .toUpperCase()
         .replace(/\s+/g, "-")
         // Allow Thai characters (Unicode blocks Thai \u0E00-\u0E7F) and standard English/numbers
-        .replace(/[^A-Z0-9ก-๙_-]/g, "");
+        .replace(/[^A-Z0-9\u0E00-\u0E7F_-]/g, "");
     });
 
   return [cleanPrefix, ...parts].filter(Boolean).join("-");

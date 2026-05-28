@@ -31,7 +31,7 @@ export async function exportTikTokMassUploadPackage(
   const sanitizedName = data.excelData.productName
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9ก-๙_-]/g, "")
+    .replace(/[^a-z0-9\u0E00-\u0E7F_-]/g, "")
     .replace(/\s+/g, "-");
   
   const dateStr = new Date().toISOString().split("T")[0];
@@ -63,7 +63,7 @@ export async function exportTikTokMassUploadPackage(
       // Naming format matches row lookup: variant_[sanitizedVal].jpg
       const sanitizedVal = optionVal
         .toLowerCase()
-        .replace(/[^a-z0-9ก-๙_-]/g, "")
+        .replace(/[^a-z0-9\u0E00-\u0E7F_-]/g, "")
         .replace(/\s+/g, "-");
       
       const cleanBase64 = extractBase64Payload(imgBase64);

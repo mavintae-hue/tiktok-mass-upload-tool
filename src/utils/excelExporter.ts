@@ -105,15 +105,25 @@ export async function generateTikTokExcelBuffer(data: ExcelExportData): Promise<
       throw new Error("Sheet 'Template' not found inside official template file.");
     }
 
-    // 1. Purge all existing data from Row 3 (A4) downwards
+    // 1. Scan for the absolute maximum column index by checking all cell keys in the worksheet (e.g. BA1 -> col index 52)
+    let maxColIdx = 27; // Default to AB (28 columns)
+    const cellKeys = Object.keys(ws).filter((key) => key[0] !== "!");
+    cellKeys.forEach((key) => {
+      try {
+        const decoded = XLSX.utils.decode_cell(key);
+        if (decoded.c > maxColIdx) maxColIdx = decoded.c;
+      } catch (e) {}
+    });
+
+    // 2. Purge all existing product data from Row 3 (A4) downwards, covering all active columns (A to BA)
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A1');
-    for (let r = 3; r <= range.e.r; r++) {
-      for (let c = 0; c <= range.e.c; c++) {
+    const lastRowToClean = Math.max(range.e.r, 50); // Ensure we clean deep enough
+    for (let r = 3; r <= lastRowToClean; r++) {
+      for (let c = 0; c <= maxColIdx; c++) {
         const cellRef = XLSX.utils.encode_cell({ r, c });
         delete ws[cellRef];
       }
     }
-    range.e.r = 2; // Reset range end to row 2
 
     // 2. Determine Category Name in Thai according to TikTok Shop tree
     const categoryName = getSuggestedCategory(data.productName);
@@ -138,7 +148,7 @@ export async function generateTikTokExcelBuffer(data: ExcelExportData): Promise<
       // Map variant image filename (based on color attribute value)
       let variantImgFilename = "";
       if (val1 && (attr1Name.toLowerCase().includes("color") || attr1Name.toLowerCase().includes("สี") || attr1Name.toLowerCase().includes("option"))) {
-        const sanitizedVal = val1.toLowerCase().replace(/[^a-z0-9ก-๙_-]/g, "").replace(/\s+/g, "-");
+        const sanitizedVal = val1.toLowerCase().replace(/[^a-z0-9\u0E00-\u0E7F_-]/g, "").replace(/\s+/g, "-");
         variantImgFilename = `product_images/variant_${sanitizedVal}.jpg`;
       }
 
@@ -190,9 +200,12 @@ export async function generateTikTokExcelBuffer(data: ExcelExportData): Promise<
     // Write starting at A4
     XLSX.utils.sheet_add_aoa(ws, sheetRowsAOA, { origin: "A4" });
 
-    // Expand ref range boundary
-    range.e.r = 3 + sheetRowsAOA.length - 1;
-    ws['!ref'] = XLSX.utils.encode_range(range);
+    // Expand ref range boundary to encompass all rows and ensure it spans up to maxColIdx (Column BA)
+    const finalLastRow = 3 + sheetRowsAOA.length - 1;
+    ws['!ref'] = XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: finalLastRow, c: maxColIdx }
+    });
 
     const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
     return new Uint8Array(excelBuffer);
@@ -207,7 +220,16 @@ export async function generateTikTokExcelBuffer(data: ExcelExportData): Promise<
  */
 function generateFallbackExcelBuffer(data: ExcelExportData): Uint8Array {
   const workbook = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, MANDATORY_ROW, EXPLANATION_ROW]);
+  
+  // Pad the fallback headers and metadata rows to exactly 53 columns to match the official template (Column BA)
+  const paddedHeaders = [...TEMPLATE_HEADERS];
+  const paddedMandatory = [...MANDATORY_ROW];
+  const paddedExplanation = [...EXPLANATION_ROW];
+  while (paddedHeaders.length < 53) paddedHeaders.push("");
+  while (paddedMandatory.length < 53) paddedMandatory.push("");
+  while (paddedExplanation.length < 53) paddedExplanation.push("");
+
+  const ws = XLSX.utils.aoa_to_sheet([paddedHeaders, paddedMandatory, paddedExplanation]);
   XLSX.utils.book_append_sheet(workbook, ws, "Template");
 
   const categoryName = getSuggestedCategory(data.productName);
@@ -228,7 +250,7 @@ function generateFallbackExcelBuffer(data: ExcelExportData): Uint8Array {
 
     let variantImgFilename = "";
     if (val1 && (attr1Name.toLowerCase().includes("color") || attr1Name.toLowerCase().includes("สี") || attr1Name.toLowerCase().includes("option"))) {
-      const sanitizedVal = val1.toLowerCase().replace(/[^a-z0-9ก-๙_-]/g, "").replace(/\s+/g, "-");
+      const sanitizedVal = val1.toLowerCase().replace(/[^a-z0-9\u0E00-\u0E7F_-]/g, "").replace(/\s+/g, "-");
       variantImgFilename = `product_images/variant_${sanitizedVal}.jpg`;
     }
 
