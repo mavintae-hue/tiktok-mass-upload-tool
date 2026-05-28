@@ -339,8 +339,17 @@ export default function TikTokDashboard() {
     setDropdownOpen(false);
     setSearchQuery("");
 
-    // 1. ตั้งชื่อสินค้าหลัก
-    setProductName(group.groupName);
+    // Heuristics to extract attributes (options and sizes)
+    const sizes = Array.from(new Set(group.items.map(item => item.size).filter(Boolean))) as string[];
+    const options = Array.from(new Set(group.items.map(item => cleanVariantValue(item.onlineName, item.size, item.brand)).filter(Boolean))) as string[];
+
+    // 1. ตั้งชื่อสินค้าหลักแบบละเอียด (ชื่อสินค้า ออนไลน์ + สีทุกสี + ขนาดทุกขนาด) ตามความต้องการของผู้ใช้เพื่อให้ AI ทำงานได้ดีที่สุด
+    const baseOnlineName = group.items[0]?.onlineName || group.groupName;
+    const colorStr = options.length > 0 ? ` สี ${options.join(", ")}` : "";
+    const sizeStr = sizes.length > 0 ? ` ขนาด ${sizes.join(", ")}` : "";
+    const detailedProductName = `${baseOnlineName}${colorStr}${sizeStr}`;
+    
+    setProductName(detailedProductName);
 
     // 2. ตั้งค่าน้ำหนักเฉลี่ย (แปลงเป็นกิโลกรัม)
     setWeight(String(group.avgWeightKg));
@@ -350,15 +359,12 @@ export default function TikTokDashboard() {
     const baseDesc = firstItemWithDesc?.description || "ผลิตภัณฑ์คุณภาพสูง คัดสรรพิเศษเพื่อคุณ";
 
     setAiContent({
-      tiktok_title: group.groupName,
+      tiktok_title: detailedProductName,
       description: baseDesc,
       market_price_analysis: `ราคาคู่แข่งออนไลน์ในกลุ่มนี้มีค่าเฉลี่ยประมาณ ${Math.min(...group.items.map(i => i.onlinePrice))} - ${Math.max(...group.items.map(i => i.onlinePrice))} บาท`
     });
 
     // 4. แยกลักษณะและค่าตัวเลือกสินค้าโดย Heuristics
-    const sizes = Array.from(new Set(group.items.map(item => item.size).filter(Boolean))) as string[];
-    const options = Array.from(new Set(group.items.map(item => cleanVariantValue(item.onlineName, item.size, item.brand)).filter(Boolean))) as string[];
-
     const newAttributes: VariantAttribute[] = [];
     if (options.length > 0) {
       newAttributes.push({ name: "Color/Option", values: options });
