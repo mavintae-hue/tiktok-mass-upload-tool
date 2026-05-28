@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Upload,
   Sparkles,
@@ -16,6 +16,11 @@ import {
   CheckCircle,
   AlertCircle,
   Info,
+  RefreshCw,
+  Search,
+  Check,
+  ChevronDown,
+  AlertTriangle,
   Image as ImageIcon
 } from "lucide-react";
 import {
@@ -26,6 +31,61 @@ import {
 } from "@/utils/variantGenerator";
 import { processBrandedImage, BrandingOptions } from "@/utils/imageBranding";
 import { exportTikTokMassUploadPackage } from "@/utils/packageExporter";
+
+// Interface for matched products from Excel
+interface ExcelProductItem {
+  code: string;
+  focusItem: string;
+  name: string;
+  thDesc: string;
+  onlineName: string;
+  type: string;
+  brand: string;
+  size: string;
+  packCs: number;
+  innerPack: number;
+  weightGrams: number;
+  rspPrice: number;
+  onlinePrice: number;
+  description: string;
+  hasPriceChange?: boolean;
+}
+
+interface ExcelProductGroup {
+  groupName: string;
+  brand: string;
+  category: string;
+  avgWeightKg: number;
+  items: ExcelProductItem[];
+}
+
+interface PriceChange {
+  itemCode: string;
+  groupName: string;
+  name: string;
+  oldOnline: number;
+  newOnline: number;
+  oldRsp: number;
+  newRsp: number;
+}
+
+// Heuristic cleaning function to extract clean variant values (colors/flavors/options)
+function cleanVariantValue(onlineName: string, size: string, brand: string): string {
+  let val = onlineName;
+  if (size) {
+    const sizeClean = size.replace(/ML/i, " มล").replace(/G/i, " กรัม");
+    val = val.replace(new RegExp(sizeClean, 'gi'), '');
+    val = val.replace(new RegExp(size, 'gi'), '');
+  }
+  if (brand) {
+    val = val.replace(new RegExp(brand, 'gi'), '');
+  }
+  val = val.replace(/(คอมฟอร์ท|โอโม|ซันไลต์|คนอร์|บรีส|ซิตร้า|Comfort|Omo|Sunlight|Knorr|Breeze|Citra)/gi, '');
+  val = val.replace(/(น้ำปรับผ้านุ่มสูตรมาตรฐาน|ผงซักฟอก สูตรมาตรฐาน|น้ำยาล้างจาน สูตร|น้ำยาซักผ้า|ผงซักฟอก|สูตรเข้มข้น|สูตรมาตรฐาน|โจ๊กคัพ|โจ๊กซองสำเร็จรูป|ซุปก้อน|โลชั่นทาผิว|น้ำปรับผ้านุ่ม|ชนิดน้ำ|โลชั่น)/gi, '');
+  val = val.replace(/[()\[\]\-+]/g, ' ');
+  val = val.replace(/\s+/g, ' ').trim();
+  return val || onlineName;
+}
 
 export default function TikTokDashboard() {
   // --- ข้อมูลตัวสินค้าหลัก ---
@@ -74,6 +134,20 @@ export default function TikTokDashboard() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
 
+  // --- ส่วนขยายข้อมูลจาก Excel (New Excel Features) ---
+  const [productGroups, setProductGroups] = useState<ExcelProductGroup[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<ExcelProductGroup | null>(null);
+  const [pricingMode, setPricingMode] = useState<"online" | "rsp">("online");
+  const [priceChanges, setPriceChanges] = useState<PriceChange[]>([]);
+  const [excelModifiedDate, setExcelModifiedDate] = useState<string>("");
+  
+  // โลคัลสเตตสำหรับ Dropdown ค้นหาและสถานะการอัปโหลด
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [completedGroups, setCompletedGroups] = useState<string[]>([]);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   // ปิดแจ้งเตือนอัตโนมัติ
   useEffect(() => {
     if (toast) {
@@ -82,7 +156,126 @@ export default function TikTokDashboard() {
     }
   }, [toast]);
 
-  // --- คำนวณตาราง Variant Cartesian Matrix ---
+  // จัดการการปิดคลิกนอกกล่อง Dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // --- โหลดข้อมูลกลุ่มสินค้าจาก Excel และ localStorage ในครั้งแรก ---
+  useEffect(() => {
+    fetchProductGroups();
+    
+    // โหลดประวัติความสำเร็จจาก LocalStorage
+    const savedCompleted = localStorage.getItem("tiktok_completed_groups");
+    if (savedCompleted) {
+      try {
+        setCompletedGroups(JSON.parse(savedCompleted));
+      } catch (e) {
+        console.error("Error loading completed groups from localStorage", e);
+      }
+    }
+  }, []);
+
+  // ฟังก์ชันดึงข้อมูลสินค้าจาก API
+  const fetchProductGroups = async (forceSync = false) => {
+    if (forceSync) setSyncLoading(true);
+    try {
+      const endpoint = "/api/products";
+      const method = forceSync ? "POST" : "GET";
+      
+      const res = await fetch(endpoint, { method });
+      const data = await res.json();
+      
+      if (data.success) {
+        setProductGroups(data.groups || []);
+        setPriceChanges(data.priceChanges || []);
+        if (data.excelModified) {
+          setExcelModifiedDate(data.excelModified);
+        }
+        if (forceSync) {
+          setToast({ 
+            type: "success", 
+            message: `ซิงค์สำเร็จ! ดึงข้อมูลสำเร็จ ${data.groups?.length || 0} กลุ่มสินค้า และตรวจพบราคาเปลี่ยน ${data.priceChanges?.length || 0} รายการ` 
+          });
+        }
+      } else {
+        throw new Error(data.error || "Failed to load product database");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setToast({ type: "error", message: `ไม่สามารถโหลดข้อมูลสินค้าจาก Excel ได้: ${err.message || err}` });
+    } finally {
+      if (forceSync) setSyncLoading(false);
+    }
+  };
+
+  // จัดการการเลือกกลุ่มสินค้า
+  const selectExcelGroup = (group: ExcelProductGroup) => {
+    setSelectedGroup(group);
+    setDropdownOpen(false);
+    setSearchQuery("");
+
+    // 1. ตั้งชื่อสินค้าหลัก
+    setProductName(group.groupName);
+
+    // 2. ตั้งค่าน้ำหนักเฉลี่ย (แปลงเป็นกิโลกรัม)
+    setWeight(String(group.avgWeightKg));
+
+    // 3. ดึงคำอธิบายทางการจากชีต 2
+    const firstItemWithDesc = group.items.find(item => item.description && item.description.trim() !== "");
+    const baseDesc = firstItemWithDesc?.description || "ผลิตภัณฑ์คุณภาพสูง คัดสรรพิเศษเพื่อคุณ";
+
+    setAiContent({
+      tiktok_title: group.groupName,
+      description: baseDesc,
+      market_price_analysis: `ราคาคู่แข่งออนไลน์ในกลุ่มนี้มีค่าเฉลี่ยประมาณ ${Math.min(...group.items.map(i => i.onlinePrice))} - ${Math.max(...group.items.map(i => i.onlinePrice))} บาท`
+    });
+
+    // 4. แยกลักษณะและค่าตัวเลือกสินค้าโดย Heuristics
+    const sizes = Array.from(new Set(group.items.map(item => item.size).filter(Boolean))) as string[];
+    const options = Array.from(new Set(group.items.map(item => cleanVariantValue(item.onlineName, item.size, item.brand)).filter(Boolean))) as string[];
+
+    const newAttributes: VariantAttribute[] = [];
+    if (options.length > 0) {
+      newAttributes.push({ name: "Color/Option", values: options });
+    }
+    if (sizes.length > 0) {
+      newAttributes.push({ name: "Size", values: sizes });
+    }
+
+    if (newAttributes.length === 0) {
+      newAttributes.push({ name: "สูตร", values: ["มาตรฐาน"] });
+    }
+
+    setAttributes(newAttributes);
+    
+    // รีเซ็ตรูปภาพของกลุ่มย่อยเก่าออกเพื่อกันความสับสน
+    setVariantImages({});
+    
+    setToast({ type: "info", message: `เชื่อมโยงกลุ่มสินค้า "${group.groupName}" สำเร็จ และสแกนพบ ${group.items.length} รายการย่อย` });
+  };
+
+  // จัดการบันทึกสถานะเสร็จสิ้นลงใน LocalStorage
+  const toggleCompletedStatus = (groupName: string) => {
+    let updated: string[];
+    if (completedGroups.includes(groupName)) {
+      updated = completedGroups.filter(g => g !== groupName);
+      setToast({ type: "info", message: `เปลี่ยนสถานะกลุ่มสินค้าเป็น "รอดำเนินการ"` });
+    } else {
+      updated = [...completedGroups, groupName];
+      setToast({ type: "success", message: `ทำเครื่องหมายกลุ่มสินค้าว่า "อัปโหลดเรียบร้อยแล้ว" ✅` });
+    }
+    setCompletedGroups(updated);
+    localStorage.setItem("tiktok_completed_groups", JSON.stringify(updated));
+  };
+
+  // --- คำนวณตาราง Variant Cartesian Matrix ร่วมกับ Excel ---
   useEffect(() => {
     const combinations = getCartesianProduct(attributes);
     const attrOrder = attributes
@@ -91,8 +284,33 @@ export default function TikTokDashboard() {
 
     const updatedRows: SkuRow[] = combinations.map((combo, idx) => {
       const comboKey = Object.values(combo).join("-");
-      const generatedSku = generateSkuString(skuPrefix, combo, attrOrder);
+      
+      // ค่ามาตรฐานเริ่มต้น
+      let generatedSku = generateSkuString(skuPrefix, combo, attrOrder);
+      let price = "199";
+      let stock = "100";
 
+      // หากมีการเลือกข้อมูลจาก Excel ให้จับคู่รายการย่อยเพื่อเอาค่าจริงมาใช้!
+      if (selectedGroup) {
+        const matchedItem = selectedGroup.items.find(item => {
+          const itemColor = cleanVariantValue(item.onlineName, item.size, item.brand);
+          const itemSize = item.size;
+
+          const colorMatch = !combo["Color/Option"] || combo["Color/Option"] === itemColor;
+          const sizeMatch = !combo["Size"] || combo["Size"] === itemSize;
+
+          return colorMatch && sizeMatch;
+        });
+
+        if (matchedItem) {
+          // ใช้รหัส Item Code ของบริษัทเป็น Seller SKU ในชีตเพื่อความถูกต้องในการจับคู่ระบบคลัง
+          generatedSku = matchedItem.code;
+          price = String(pricingMode === "online" ? matchedItem.onlinePrice : matchedItem.rspPrice);
+          stock = "100";
+        }
+      }
+
+      // ตรวจสอบว่าผู้ใช้เคยแก้ไขราคารายเซลล์ในช่องพรีวิวด้วยตนเองหรือไม่
       const existingRow = skuRows.find(
         (r) => Object.values(r.combination).join("-") === comboKey
       );
@@ -100,14 +318,14 @@ export default function TikTokDashboard() {
       return {
         id: `row-${idx}`,
         combination: combo,
-        price: existingRow?.price || "199",
-        stock: existingRow?.stock || "100",
+        price: existingRow?.price && existingRow.sku === generatedSku ? existingRow.price : price,
+        stock: existingRow?.stock || stock,
         sku: generatedSku
       };
     });
 
     setSkuRows(updatedRows);
-  }, [attributes, skuPrefix]);
+  }, [attributes, skuPrefix, selectedGroup, pricingMode]);
 
   // คืนค่าหน่วยความจำ Object URLs
   useEffect(() => {
@@ -318,6 +536,17 @@ export default function TikTokDashboard() {
       };
 
       await exportTikTokMassUploadPackage(exportPayload);
+      
+      // มาร์กกลุ่มสินค้าเสร็จสิ้นในความจำ
+      if (selectedGroup) {
+        const groupName = selectedGroup.groupName;
+        if (!completedGroups.includes(groupName)) {
+          const updated = [...completedGroups, groupName];
+          setCompletedGroups(updated);
+          localStorage.setItem("tiktok_completed_groups", JSON.stringify(updated));
+        }
+      }
+
       setToast({ type: "success", message: "ส่งออกแพ็กเกจลงทะเบียนสินค้าสำเร็จแล้ว (ไฟล์ ZIP/Excel)!" });
     } catch (err: any) {
       console.error(err);
@@ -341,8 +570,14 @@ export default function TikTokDashboard() {
   });
 
   const firstAttr = attributes[0];
-  const isColorAttribute = firstAttr && (firstAttr.name.toLowerCase().includes("color") || firstAttr.name.toLowerCase().includes("สี"));
+  const isColorAttribute = firstAttr && (firstAttr.name.toLowerCase().includes("color") || firstAttr.name.toLowerCase().includes("สี") || firstAttr.name.toLowerCase().includes("option"));
   const colorVariantValues = isColorAttribute ? firstAttr.values : [];
+
+  // การกรองกลุ่มสินค้าตามการสืบค้น
+  const filteredGroups = productGroups.filter(g => 
+    g.groupName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    g.brand.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#334155] font-sans pb-24 selection:bg-orange-500 selection:text-white">
@@ -374,17 +609,219 @@ export default function TikTokDashboard() {
               <h1 className="text-lg font-bold tracking-tight text-slate-900 flex items-center gap-2">
                 เครื่องมือเตรียมอัปโหลดสินค้า TikTok Shop
                 <span className="text-[10px] uppercase font-bold bg-indigo-50 border border-indigo-150 text-indigo-600 px-2 py-0.5 rounded-full">
-                  พรีเมียม AI v2.0
+                  พรีเมียม AI v2.1
                 </span>
               </h1>
-              <p className="text-xs text-slate-500">ระบบอัตโนมัติจัดรูปแบบภาพ 1:1, ใส่กรอบแบรนด์ และสร้างข้อมูลสินค้าด้วย AI</p>
+              <p className="text-xs text-slate-500">ระบบอัตโนมัติเชื่อมโยงฐานข้อมูล Excel, ใส่กรอบแบรนด์ และวิเคราะห์สินค้าด้วย AI</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span>เครื่องหลัก LAN: <strong className="text-orange-600">192.168.1.221</strong></span>
+          <div className="flex items-center gap-4 text-xs">
+            {excelModifiedDate && (
+              <span className="text-slate-500 hidden sm:inline">
+                📅 อัปเดต Excel ล่าสุด: <strong className="text-slate-700">{excelModifiedDate}</strong>
+              </span>
+            )}
+            <span className="text-slate-400">LAN: <strong className="text-orange-600">192.168.1.221</strong></span>
           </div>
         </div>
       </header>
+
+      {/* บล็อกแผงควบคุมหลักเต็มหน้าจอ (Excel integration center) */}
+      <div className="max-w-7xl mx-auto px-6 pt-8">
+        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 border-l-4 border-l-orange-500">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-6 pb-6 border-b border-slate-100">
+            <div>
+              <h2 className="text-sm uppercase tracking-widest font-bold text-orange-600 flex items-center gap-2 mb-1">
+                <Settings className="w-4 h-4" /> 📦 เชื่อมโยงฐานข้อมูลรายการสินค้า Excel รายเดือน
+              </h2>
+              <p className="text-xs text-slate-500">
+                เลือกสินค้าจากตาราง Excel ของบริษัท ระบบจะดึงรายละเอียดสินค้า ค้นหาขนาด จัดกลุ่มย่อย และตั้งราคาขายให้อัตโนมัติ
+              </p>
+            </div>
+            
+            <button
+              onClick={() => fetchProductGroups(true)}
+              disabled={syncLoading}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:border-slate-350 hover:bg-slate-50 bg-white cursor-pointer text-xs font-bold text-slate-700 transition shadow-sm disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${syncLoading ? "animate-spin" : ""}`} />
+              {syncLoading ? "กำลังแกะข้อมูล Excel..." : "อัปเดตข้อมูลจาก Excel"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-end">
+            {/* คอลัมน์ที่ 1: ค้นหาและเลือกสินค้า (Search Dropdown) */}
+            <div className="relative" ref={dropdownRef}>
+              <label className="block text-xs font-bold text-slate-650 mb-2">เลือกสินค้าจาก Excel*</label>
+              
+              <button
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 hover:bg-slate-100/50 transition text-left focus:outline-none"
+              >
+                <span className="truncate flex items-center gap-2">
+                  {selectedGroup ? (
+                    <>
+                      {completedGroups.includes(selectedGroup.groupName) ? (
+                        <span className="text-emerald-600 text-xs font-bold">✅</span>
+                      ) : (
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                      )}
+                      <strong className="text-slate-800">{selectedGroup.groupName}</strong>
+                      <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono">
+                        {selectedGroup.items.length} รายการ
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-400">--- เลือกสินค้ายี่ห้อและสูตร ---</span>
+                  )}
+                </span>
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              </button>
+
+              {dropdownOpen && (
+                <div className="absolute left-0 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 animate-in fade-in slide-in-from-top-3 duration-200 max-h-80 overflow-y-auto">
+                  <div className="relative mb-2">
+                    <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="ค้นหาชื่อสินค้า หรือแบรนด์..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-orange-500 text-slate-700 bg-slate-50/50"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    {filteredGroups.length > 0 ? (
+                      filteredGroups.map((group) => {
+                        const isDone = completedGroups.includes(group.groupName);
+                        const hasPriceChange = group.items.some(i => i.hasPriceChange);
+                        return (
+                          <button
+                            key={group.groupName}
+                            onClick={() => selectExcelGroup(group)}
+                            className={`w-full flex items-center justify-between p-2.5 rounded-lg text-left text-xs transition ${
+                              selectedGroup?.groupName === group.groupName
+                                ? "bg-orange-50 text-orange-850 font-bold"
+                                : "hover:bg-slate-50 text-slate-700 font-semibold"
+                            }`}
+                          >
+                            <div className="flex flex-col gap-0.5 truncate pr-2">
+                              <span className="truncate flex items-center gap-1.5">
+                                {isDone && <Check className="w-3.5 h-3.5 text-emerald-600 font-bold" />}
+                                {group.groupName}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium font-sans">
+                                แบรนด์: {group.brand} | ประเภท: {group.category}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {hasPriceChange && (
+                                <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-200 flex items-center gap-0.5">
+                                  <AlertTriangle className="w-2.5 h-2.5" /> ราคาเปลี่ยน
+                                </span>
+                              )}
+                              <span className="text-[10px] bg-slate-100 text-slate-500 font-bold font-mono px-2 py-0.5 rounded">
+                                {group.items.length} SKU
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="text-center py-4 text-xs text-slate-400 font-medium">ไม่พบสินค้าที่คุณค้นหา</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* คอลัมน์ที่ 2: การเลือกราคาแนะนำขาย (Online vs RSP) */}
+            <div>
+              <label className="block text-xs font-bold text-slate-650 mb-2">เลือกราคาแนะนำขายหลัก</label>
+              <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setPricingMode("online")}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
+                    pricingMode === "online"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-750"
+                  }`}
+                >
+                  <Coins className="w-3.5 h-3.5 text-indigo-500" /> ราคาขาย Online
+                </button>
+                <button
+                  onClick={() => setPricingMode("rsp")}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
+                    pricingMode === "rsp"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-750"
+                  }`}
+                >
+                  👑 RSP หัวเสือปกติ
+                </button>
+              </div>
+            </div>
+
+            {/* คอลัมน์ที่ 3: แสดงความคืบหน้ากลุ่มสินค้า */}
+            {selectedGroup && (
+              <div className="flex items-center gap-4 bg-slate-50 p-2.5 rounded-xl border border-slate-150">
+                <div className="flex-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">สถานะกลุ่มนี้</span>
+                  <span className={`text-xs font-bold flex items-center gap-1.5 ${
+                    completedGroups.includes(selectedGroup.groupName) ? "text-emerald-700" : "text-amber-700"
+                  }`}>
+                    {completedGroups.includes(selectedGroup.groupName) ? (
+                      <>✅ ทำเสร็จสิ้นแล้ว</>
+                    ) : (
+                      <>⏳ รอดำเนินการ</>
+                    )}
+                  </span>
+                </div>
+                <button
+                  onClick={() => toggleCompletedStatus(selectedGroup.groupName)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition ${
+                    completedGroups.includes(selectedGroup.groupName)
+                      ? "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
+                      : "bg-emerald-50 border-emerald-250 text-emerald-750 hover:bg-emerald-100"
+                  }`}
+                >
+                  {completedGroups.includes(selectedGroup.groupName) ? "ตั้งเป็น รอดำเนินการ" : "มาร์กแบรนด์นี้ว่าทำแล้ว"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* รายงานตรวจพบการเปลี่ยนแปลงราคาออนไลน์ประจำเดือน */}
+          {priceChanges.length > 0 && (
+            <div className="mt-6 p-4 border border-amber-250 bg-amber-50/30 rounded-xl">
+              <h3 className="text-xs font-bold text-amber-700 mb-2 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 animate-bounce" /> 🔔 รายงานตรวจสอบพบการเปลี่ยนแปลงราคาสินค้าประจำรอบเดือน!
+              </h3>
+              <p className="text-[10px] text-slate-500 mb-3 font-semibold leading-relaxed">
+                ระบบได้ตรวจพบข้อมูลราคาสินค้าใน Excel รอบใหม่มีการเปลี่ยนแปลงเมื่อเทียบกับราคารอบก่อนหน้านี้ โปรดอัปเดตราคาใน TikTok Shop ของคุณ:
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-32 overflow-y-auto pr-1">
+                {priceChanges.map((change, idx) => (
+                  <div key={idx} className="p-2 rounded-lg bg-white border border-slate-150 text-[10px] flex items-center justify-between shadow-inner">
+                    <div className="truncate pr-2">
+                      <span className="font-bold text-slate-800 truncate block">{change.name}</span>
+                      <span className="text-[9px] text-slate-400 font-mono">รหัสสินค้า: {change.itemCode} | {change.groupName}</span>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <span className="text-slate-400 font-mono">Online: </span>
+                      <span className="text-rose-500 line-through font-mono">{change.oldOnline}฿</span>
+                      <span className="text-slate-400 mx-1">→</span>
+                      <span className="text-emerald-600 font-bold font-mono">{change.newOnline}฿</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* แผงควบคุมแบ่งซ้าย-ขวา */}
       <main className="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -634,7 +1071,7 @@ export default function TikTokDashboard() {
               {attributes.map((attr, idx) => (
                 <div key={idx} className="flex gap-4 items-start p-4 rounded-xl border border-slate-100 bg-slate-50/50 relative">
                   <div className="w-1/3">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5 font-bold">ชื่อตัวเลือกสินค้า</label>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5">ชื่อตัวเลือกสินค้า</label>
                     <input
                       type="text"
                       value={attr.name}
@@ -644,7 +1081,7 @@ export default function TikTokDashboard() {
                     />
                   </div>
                   <div className="flex-1">
-                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5 font-bold">ค่าตัวเลือกย่อย (คั่นด้วยเครื่องหมายจุลภาค , )</label>
+                    <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5">ค่าตัวเลือกย่อย (คั่นด้วยเครื่องหมายจุลภาค , )</label>
                     <input
                       type="text"
                       value={attr.values.join(", ")}
@@ -793,7 +1230,7 @@ export default function TikTokDashboard() {
           {/* รายละเอียดแนะนำโดย AI (Gemini Panel) */}
           <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 relative overflow-hidden border-l-4 border-l-orange-500">
             <h2 className="text-sm uppercase tracking-widest font-bold text-orange-600 mb-4 flex items-center gap-2">
-              <Sparkles className="w-4 h-4" /> 5. ข้อมูลสินค้าสำหรับ TikTok Shop โดย AI (Gemini)
+              <Sparkles className="w-4 h-4" /> 5. รายละเอียดสินค้า
             </h2>
 
             {aiContent ? (
@@ -821,18 +1258,20 @@ export default function TikTokDashboard() {
                   />
                 </div>
 
-                <div className="p-3.5 rounded-xl border border-orange-100 bg-orange-50/40 text-slate-700">
-                  <div className="flex items-center gap-1.5 text-xs text-orange-600 font-bold mb-1">
-                    <Info className="w-3.5 h-3.5 text-orange-500 animate-pulse" /> ข้อมูลวิเคราะห์ราคาคู่แข่งในตลาดออนไลน์
+                {aiContent.market_price_analysis && (
+                  <div className="p-3.5 rounded-xl border border-orange-100 bg-orange-50/40 text-slate-700">
+                    <div className="flex items-center gap-1.5 text-xs text-orange-600 font-bold mb-1">
+                      <Info className="w-3.5 h-3.5 text-orange-500 animate-pulse" /> ข้อมูลราคาสินค้าแนะนํา
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{aiContent.market_price_analysis}</p>
                   </div>
-                  <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{aiContent.market_price_analysis}</p>
-                </div>
+                )}
               </div>
             ) : (
               <div className="p-8 border border-slate-200 border-dashed rounded-xl flex flex-col items-center justify-center text-center gap-2">
                 <Sparkles className="w-8 h-8 text-slate-400 mb-1" />
-                <p className="text-xs text-slate-500 font-bold">ยังไม่ได้สร้างข้อมูลสินค้าด้วย AI</p>
-                <p className="text-[10px] text-slate-400 max-w-xs leading-relaxed">ระบุชื่อสินค้าหลักด้านบนแล้วคลิก "สร้างข้อมูลด้วย AI" ระบบจะดึงคำค้นหายอดนิยมมาสร้างชื่อและหัวข้อสินค้าให้อัตโนมัติ</p>
+                <p className="text-xs text-slate-500 font-bold">ยังไม่มีข้อมูลสินค้า</p>
+                <p className="text-[10px] text-slate-400 max-w-xs leading-relaxed">เลือกเชื่อมโยงข้อมูล Excel ด้านบน หรือระบุชื่อสินค้าแล้วคลิก "สร้างข้อมูลด้วย AI"</p>
               </div>
             )}
           </div>
@@ -876,17 +1315,50 @@ export default function TikTokDashboard() {
                         .map(([k, v]) => `${v}`)
                         .join(" - ");
 
+                      // ตรวจสอบราคาในอดีต (หากมี) เพื่อรายงานราคาที่แตกต่าง
+                      let previousPriceLabel = "";
+                      if (selectedGroup) {
+                        const matchedItem = selectedGroup.items.find(item => item.code === row.sku);
+                        if (matchedItem && matchedItem.hasPriceChange) {
+                          // ดึงประวัติราคารอบที่แล้ว
+                          const hist = priceChanges.find(c => c.itemCode === row.sku);
+                          if (hist) {
+                            const oldPrice = pricingMode === "online" ? hist.oldOnline : hist.oldRsp;
+                            const newPrice = pricingMode === "online" ? hist.newOnline : hist.newRsp;
+                            if (oldPrice !== newPrice) {
+                              previousPriceLabel = `เดิม: ${oldPrice}฿`;
+                            }
+                          }
+                        }
+                      }
+
                       return (
                         <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                          <td className="p-3 text-slate-900 font-bold">{comboStr}</td>
+                          <td className="p-3 text-slate-900 font-bold">
+                            <span className="flex items-center gap-1">
+                              {comboStr}
+                              {previousPriceLabel && (
+                                <span className="text-[8px] bg-rose-50 border border-rose-200 text-rose-600 px-1 py-0.5 rounded font-mono font-bold animate-pulse">
+                                  ราคาอัปเดต
+                                </span>
+                              )}
+                            </span>
+                          </td>
                           <td className="p-3 text-slate-500 font-mono font-semibold">{row.sku}</td>
-                          <td className="p-3">
+                          <td className="p-3 relative">
                             <input
                               type="text"
                               value={row.price}
                               onChange={(e) => handleMatrixCellChange(row.id, "price", e.target.value)}
-                              className="w-full px-2 py-1 rounded bg-white border border-slate-200 text-right focus:outline-none focus:border-indigo-500 text-emerald-600 font-bold shadow-inner"
+                              className={`w-full px-2 py-1 rounded bg-white border text-right focus:outline-none focus:border-indigo-500 text-emerald-600 font-bold shadow-inner ${
+                                previousPriceLabel ? "border-amber-300 bg-amber-50/20" : "border-slate-200"
+                              }`}
                             />
+                            {previousPriceLabel && (
+                              <span className="absolute right-3 -bottom-0.5 text-[8px] text-slate-400 font-mono scale-90 block">
+                                {previousPriceLabel}
+                              </span>
+                            )}
                           </td>
                           <td className="p-3">
                             <input
