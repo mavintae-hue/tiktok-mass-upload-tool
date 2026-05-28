@@ -41,38 +41,52 @@ You MUST return a JSON object matching this exact structure:
 `;
 
     let responseText = "";
+    const errors: string[] = [];
+
+    // 1. Try Gemini 1.5 Flash first (most widely supported and highly reliable standard model)
     try {
-      // 1. Try modern Gemini 2.5 Flash first
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: "gemini-1.5-flash",
         generationConfig: { responseMimeType: "application/json" },
       });
       const result = await model.generateContent(prompt);
       responseText = result.response.text();
-    } catch (err25) {
-      console.warn("Gemini 2.5 Flash failed, trying 1.5 Flash...", err25);
+    } catch (err15) {
+      const errMsg = err15 instanceof Error ? err15.message : String(err15);
+      errors.push(`Gemini 1.5 Flash Error: ${errMsg}`);
+      console.warn("Gemini 1.5 Flash failed, trying 2.5 Flash...", err15);
+
+      // 2. Fallback to Gemini 2.5 Flash
       try {
-        // 2. Fallback to Gemini 1.5 Flash
-        const model15 = genAI.getGenerativeModel({
-          model: "gemini-1.5-flash",
+        const model25 = genAI.getGenerativeModel({
+          model: "gemini-2.5-flash",
           generationConfig: { responseMimeType: "application/json" },
         });
-        const result = await model15.generateContent(prompt);
+        const result = await model25.generateContent(prompt);
         responseText = result.response.text();
-      } catch (err15) {
-        console.warn("Gemini 1.5 Flash failed, trying 1.5 Pro...", err15);
-        // 3. Fallback to Gemini 1.5 Pro
-        const modelPro = genAI.getGenerativeModel({
-          model: "gemini-1.5-pro",
-          generationConfig: { responseMimeType: "application/json" },
-        });
-        const result = await modelPro.generateContent(prompt);
-        responseText = result.response.text();
+      } catch (err25) {
+        const errMsg25 = err25 instanceof Error ? err25.message : String(err25);
+        errors.push(`Gemini 2.5 Flash Error: ${errMsg25}`);
+        console.warn("Gemini 2.5 Flash failed, trying 1.5 Pro...", err25);
+
+        // 3. Fallback to Gemini 1.5 Pro (latest exp / stable)
+        try {
+          const modelPro = genAI.getGenerativeModel({
+            model: "gemini-1.5-pro",
+            generationConfig: { responseMimeType: "application/json" },
+          });
+          const result = await modelPro.generateContent(prompt);
+          responseText = result.response.text();
+        } catch (errPro) {
+          const errMsgPro = errPro instanceof Error ? errPro.message : String(errPro);
+          errors.push(`Gemini 1.5 Pro Error: ${errMsgPro}`);
+          console.warn("Gemini 1.5 Pro failed.", errPro);
+        }
       }
     }
 
     if (!responseText) {
-      throw new Error("Received empty response from Gemini API.");
+      throw new Error(`ไม่สามารถใช้บริการ Gemini API ได้ในขณะนี้เนื่องจาก:\n${errors.join("\n")}`);
     }
 
     // Parse the response to verify it is valid JSON
