@@ -31,6 +31,7 @@ import {
 } from "@/utils/variantGenerator";
 import { processBrandedImage, BrandingOptions } from "@/utils/imageBranding";
 import { exportTikTokMassUploadPackage } from "@/utils/packageExporter";
+import * as XLSX from "xlsx";
 
 // Interface for matched products from Excel
 interface ExcelProductItem {
@@ -213,6 +214,123 @@ export default function TikTokDashboard() {
     } finally {
       if (forceSync) setSyncLoading(false);
     }
+  };
+
+  // ฟังก์ชันอัปโหลดและแกะข้อมูล Excel ฝั่ง Client-side (เป็นระบบ Fallback สำรองหากเซิร์ฟเวอร์โหลดไฟล์ไม่ได้)
+  const handleExcelFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    
+    setSyncLoading(true);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = evt.target?.result;
+        if (!data) throw new Error("ไม่สามารถอ่านข้อมูลไฟล์ได้");
+        
+        const workbook = XLSX.read(data, { type: "array" });
+        
+        const ws1 = workbook.Sheets['Product list & Price'];
+        if (!ws1) {
+          throw new Error("ไม่พบชีต 'Product list & Price' ในไฟล์ Excel ที่เลือก");
+        }
+        const data1 = XLSX.utils.sheet_to_json<any[]>(ws1, { header: 1 });
+
+        const ws2 = workbook.Sheets['Product name & description'];
+        const data2 = ws2 ? XLSX.utils.sheet_to_json<any[]>(ws2, { header: 1 }) : [];
+
+        // สร้างแผนที่คำอธิบายจาก ชีต 2
+        const descMap: Record<string, string> = {};
+        data2.forEach((row: any) => {
+          if (row && row[1]) {
+            const code = String(row[1]).trim();
+            const desc = row[5] || "";
+            descMap[code] = desc;
+          }
+        });
+
+        const groups: Record<string, ExcelProductGroup> = {};
+
+        // หัวตารางอยู่ที่แถวที่ 7. ข้อมูลเริ่มที่แถวที่ 9 (ดัชนี 8)
+        for (let i = 8; i < data1.length; i++) {
+          const row = data1[i];
+          if (!row || row.length < 9) continue;
+
+          const focusItem = String(row[0] || "").trim();
+          const groupName = String(row[1] || "").trim();
+          const code = String(row[2] || "").trim();
+          const name = String(row[3] || "").trim();
+          const thDesc = String(row[4] || "").trim();
+          const onlineName = String(row[5] || "").trim();
+          const type = String(row[6] || "").trim();
+          const brand = String(row[7] || "").trim();
+          const size = String(row[8] || "").trim();
+          const packCs = Number(row[9] || 0);
+          const innerPack = Number(row[10] || 0);
+          const weightGrams = Number(row[12] || 0);
+          
+          const rspPrice = Number(row[29] || 0);
+          const onlinePrice = Number(row[32] || 0);
+
+          if (!groupName || !code) continue;
+
+          const item: ExcelProductItem = {
+            code,
+            focusItem,
+            name,
+            thDesc,
+            onlineName: onlineName || thDesc || name,
+            type,
+            brand,
+            size,
+            packCs,
+            innerPack,
+            weightGrams,
+            rspPrice,
+            onlinePrice,
+            description: descMap[code] || "",
+            hasPriceChange: false
+          };
+
+          if (!groups[groupName]) {
+            groups[groupName] = {
+              groupName,
+              brand: brand || "Unbranded",
+              category: type || "General",
+              avgWeightKg: 0,
+              items: []
+            };
+          }
+
+          groups[groupName].items.push(item);
+        }
+
+        Object.keys(groups).forEach((gName) => {
+          const group = groups[gName];
+          const totalGrams = group.items.reduce((acc, item) => acc + item.weightGrams, 0);
+          const avgGrams = totalGrams / group.items.length;
+          group.avgWeightKg = parseFloat((avgGrams / 1000).toFixed(3));
+        });
+
+        const parsedGroups = Object.values(groups);
+        setProductGroups(parsedGroups);
+        setExcelModifiedDate(`${new Date().toLocaleDateString("th-TH")} (อัปโหลดเอง)`);
+        setToast({
+          type: "success",
+          message: `โหลดสำเร็จ! อ่านข้อมูลสำเร็จ ${parsedGroups.length} กลุ่มสินค้าจากไฟล์ที่คุณอัปโหลดโดยตรง`
+        });
+      } catch (err: any) {
+        console.error("Client Excel upload parsing error:", err);
+        setToast({ type: "error", message: `ไม่สามารถอ่านโครงสร้างไฟล์ Excel ได้: ${err.message || err}` });
+      } finally {
+        setSyncLoading(false);
+      }
+    };
+    reader.onerror = () => {
+      setToast({ type: "error", message: "ไม่สามารถอ่านไฟล์ Excel ที่อัปโหลดได้" });
+      setSyncLoading(false);
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   // จัดการการเลือกกลุ่มสินค้า
@@ -639,14 +757,27 @@ export default function TikTokDashboard() {
               </p>
             </div>
             
-            <button
-              onClick={() => fetchProductGroups(true)}
-              disabled={syncLoading}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:border-slate-350 hover:bg-slate-50 bg-white cursor-pointer text-xs font-bold text-slate-700 transition shadow-sm disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${syncLoading ? "animate-spin" : ""}`} />
-              {syncLoading ? "กำลังแกะข้อมูล Excel..." : "อัปเดตข้อมูลจาก Excel"}
-            </button>
+            <div className="flex flex-wrap gap-2.5">
+              <button
+                onClick={() => fetchProductGroups(true)}
+                disabled={syncLoading}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 hover:border-slate-350 hover:bg-slate-50 bg-white cursor-pointer text-xs font-bold text-slate-700 transition shadow-sm disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${syncLoading ? "animate-spin" : ""}`} />
+                {syncLoading ? "กำลังแกะข้อมูล Excel..." : "อัปเดตข้อมูลจากเซิร์ฟเวอร์"}
+              </button>
+
+              <label className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-50 text-indigo-700 cursor-pointer text-xs font-bold transition shadow-sm hover:border-indigo-350">
+                <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                อัปโหลดไฟล์ Excel เอง (.xlsx)
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handleExcelFileUpload}
+                  className="hidden"
+                />
+              </label>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-end">
