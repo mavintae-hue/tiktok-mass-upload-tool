@@ -4,12 +4,15 @@ import path from "path";
 import * as XLSX from "xlsx";
 
 // Path to the Excel file and cached JSON file
-const EXCEL_FILE_PATH = path.join(process.cwd(), "public", "DT ONLINE_CORE SKU List data as of 17 May'26.xlsx");
+const EXCEL_FILE_PATH = path.join(process.cwd(), "src", "data", "DT ONLINE_CORE SKU List data as of 17 May'26.xlsx");
 
 // Detect serverless environments (like Vercel AWS Lambda) where the workspace is read-only
 const isServerless = typeof process !== "undefined" && (process.env.VERCEL || process.env.NODE_ENV === "production" || process.cwd().includes("var/task"));
 const CACHE_DIR = isServerless ? "/tmp" : path.join(process.cwd(), "src", "data");
 const CACHE_FILE_PATH = path.join(CACHE_DIR, "products.json");
+
+// Read-only fallback cache inside the deployment bundle
+const READONLY_CACHE_FILE_PATH = path.join(process.cwd(), "src", "data", "products.json");
 
 interface ProductItem {
   code: string;
@@ -82,7 +85,8 @@ function parseExcelData(previousCache: ParsedCache | null): ParsedCache {
   }
 
   // Load workbook
-  const workbook = XLSX.readFile(EXCEL_FILE_PATH);
+  const fileBuffer = fs.readFileSync(EXCEL_FILE_PATH);
+  const workbook = XLSX.read(fileBuffer, { type: "buffer" });
   
   // Sheet 1: Product list & Price
   const ws1 = workbook.Sheets['Product list & Price'];
@@ -227,7 +231,7 @@ export async function GET() {
       excelMtime = fs.statSync(EXCEL_FILE_PATH).mtimeMs;
     }
 
-    // Check if cache file exists
+    // Check if cache file exists in writable cache
     if (fs.existsSync(CACHE_FILE_PATH)) {
       try {
         const rawCache = fs.readFileSync(CACHE_FILE_PATH, "utf-8");
@@ -237,11 +241,27 @@ export async function GET() {
       }
     }
 
-    // Re-parse if cache is missing or stale
-    if (!cacheData || cacheData.excelMtime !== excelMtime) {
+    // Fallback to read-only pre-packaged cache if writable cache is empty
+    if (!cacheData && fs.existsSync(READONLY_CACHE_FILE_PATH)) {
+      try {
+        const rawCache = fs.readFileSync(READONLY_CACHE_FILE_PATH, "utf-8");
+        cacheData = JSON.parse(rawCache);
+        console.log("Loaded pre-packaged cache from src/data/products.json");
+      } catch (err) {
+        console.warn("Stale or invalid read-only JSON cache file.", err);
+      }
+    }
+
+    // Re-parse if cache is missing or stale. On serverless, we rely on the pre-packaged cache first and don't force re-parse on GET unless cache is completely missing.
+    const isStale = isServerless ? !cacheData : (!cacheData || cacheData.excelMtime !== excelMtime);
+    if (isStale) {
       console.log("Cache is stale or missing. Parsing Excel sheet...");
       cacheData = parseExcelData(cacheData);
       writeToCache(cacheData);
+    }
+
+    if (!cacheData) {
+      throw new Error("Unable to load or parse product cache data.");
     }
 
     return NextResponse.json({

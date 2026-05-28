@@ -41,4 +41,6 @@ yarn-error.log*
 next-env.d.ts
 
 # local products cache
-/src/data/
+/src/data/*
+!/src/data/DT ONLINE_CORE SKU List data as of 17 May'26.xlsx
+!/src/data/products.json
