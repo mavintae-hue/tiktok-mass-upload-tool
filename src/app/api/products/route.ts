@@ -4,7 +4,7 @@ import path from "path";
 import * as XLSX from "xlsx";
 
 // Path to the Excel file and cached JSON file
-const EXCEL_FILE_PATH = path.join(process.cwd(), "DT ONLINE_CORE SKU List data as of 17 May'26.xlsx");
+const EXCEL_FILE_PATH = path.join(process.cwd(), "public", "DT ONLINE_CORE SKU List data as of 17 May'26.xlsx");
 
 // Detect serverless environments (like Vercel AWS Lambda) where the workspace is read-only
 const isServerless = typeof process !== "undefined" && (process.env.VERCEL || process.env.NODE_ENV === "production" || process.cwd().includes("var/task"));
