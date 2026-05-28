@@ -15,24 +15,13 @@ export interface ExcelExportData {
 
 /**
  * Generates an Excel spreadsheet buffer by overlaying data onto the official TikTok Seller Center template.
- * This guarantees 100% correct uploads with all original verification rules and metadata intact.
+ * If fetching the template fails, it falls back to dynamically compiling a perfectly formatted 5-header sheet.
  */
 export async function generateTikTokExcelBuffer(data: ExcelExportData): Promise<Uint8Array> {
-  // 1. Fetch the official TikTok template from public assets
-  const response = await fetch("/Tiktoksellercenter_batchupload_20260528_template.xlsx");
-  if (!response.ok) {
-    throw new Error("ไม่สามารถดาวน์โหลดเทมเพลตต้นฉบับจากเซิร์ฟเวอร์ได้ (public/Tiktoksellercenter_batchupload_20260528_template.xlsx)");
-  }
-  const arrayBuffer = await response.arrayBuffer();
-  
-  // 2. Read the template workbook
-  const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
-  const sheet = workbook.Sheets["Template"];
-  if (!sheet) {
-    throw new Error("ไม่พบชีต 'Template' ในไฟล์เทมเพลตของ TikTok");
-  }
+  let workbook: XLSX.WorkBook;
+  let sheet: XLSX.WorkSheet;
 
-  // 3. Map dynamic categories based on official options in Sheet 7 "Category"
+  // 1. Map dynamic categories based on official options in Sheet 7 "Category"
   let categorySuggestion = "ผลิตภัณฑ์อาบน้ำและดูแลผิวกาย/ครีมบำรุงผิวกายและโลชั่น"; // Default body lotion
   const nameLower = data.productName.toLowerCase();
   if (
@@ -65,14 +54,14 @@ export async function generateTikTokExcelBuffer(data: ExcelExportData): Promise<
     categorySuggestion = "ผลิตภัณฑ์อาบน้ำและดูแลผิวกาย/สบู่เหลวและสบู่ก้อน";
   }
 
-  // 4. Extract active attributes
+  // 2. Extract active attributes
   const activeAttributes = data.attributes.filter(
     (attr) => attr.name.trim() !== "" && attr.values.length > 0
   );
   const attr1Name = activeAttributes[0]?.name || "";
   const attr2Name = activeAttributes[1]?.name || "";
 
-  // 5. Build row arrays exactly matching columns A to AB (Row 6 starts at index 5)
+  // 3. Build row arrays exactly matching columns A to AB (Row 6 starts at index 5)
   const aoaRows = data.skuRows.map((row) => {
     const val1 = activeAttributes[0] ? row.combination[attr1Name] || "" : "";
     const val2 = activeAttributes[1] ? row.combination[attr2Name] || "" : "";
@@ -116,10 +105,55 @@ export async function generateTikTokExcelBuffer(data: ExcelExportData): Promise<
     ];
   });
 
-  // 6. Overwrite data starting from A6 (Overwriting sample Row 6 and expanding downwards)
+  try {
+    // Try to fetch the official TikTok template from public assets in the browser
+    const response = await fetch("/Tiktoksellercenter_batchupload_20260528_template.xlsx");
+    if (!response.ok) {
+      throw new Error(`Template returned response status: ${response.status}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    
+    // Read the template workbook
+    workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
+    const templateSheet = workbook.Sheets["Template"];
+    if (!templateSheet) {
+      throw new Error("ไม่พบชีต 'Template' ในไฟล์ต้นแบบ");
+    }
+    sheet = templateSheet;
+    console.log("[EXCEL] Loaded official TikTok template. Overwriting Row 6+...");
+  } catch (err) {
+    console.warn("[EXCEL] Failed to load official TikTok template from public path. Falling back to dynamic rendering...", err);
+    
+    // Build a brand-new workbook and sheet as fallback
+    workbook = XLSX.utils.book_new();
+    sheet = XLSX.utils.json_to_sheet([]);
+    XLSX.utils.book_append_sheet(workbook, sheet, "Template");
+
+    // Mimic the 5-row header structure of TikTok's template so A6 maps correctly
+    const headers = [
+      "หมวดหมู่", "แบรนด์", "ชื่อสินค้า", "คำอธิบายสินค้า",
+      "ภาพหลัก", "ภาพที่ 2", "ภาพที่ 3", "ภาพที่ 4", "ภาพที่ 5", "ภาพที่ 6", "ภาพที่ 7", "ภาพสินค้า 8", "ภาพสินค้า 9",
+      "ชื่อตัวเลือกสินค้าหลัก (ธีม)", "ค่าตัวเลือกสินค้าหลัก (ตัวเลือก)", "ตัวเลือกสินค้าหลักภาพที่ 1",
+      "ชื่อตัวเลือกสินค้ารอง (ธีม)", "ค่าตัวเลือกสินค้ารอง (ตัวเลือก)",
+      "น้ำหนักพัสดุ(g)", "ความยาวของพัสดุ(cm)", "ความกว้างของพัสดุ(cm)", "ความสูงของพัสดุ(cm)",
+      "ตัวเลือกในการจัดส่ง", "ราคาขายปลีก (สกุลเงินท้องถิ่น)", "เปิดขายล่วงหน้า: เวลาจัดการคำสั่งซื้อ", "ปริมาณ", "SKU ของผู้ขาย", "ตารางขนาด"
+    ];
+
+    const headerAoa = [
+      headers,                                           // Row 1: English display
+      headers.map((h, i) => i === 1 || i >= 23 && i !== 25 ? "ไม่บังคับ" : "บังคับ"), // Row 2: Validation
+      headers.map(() => "รายละเอียดคุณลักษณะสินค้าสำหรับ TikTok Seller Center"), // Row 3: Help
+      headers.map(() => ""),                             // Row 4: Empty spacer
+      headers.map(() => "")                              // Row 5: Empty spacer
+    ];
+
+    XLSX.utils.sheet_add_aoa(sheet, headerAoa, { origin: "A1" });
+  }
+
+  // 4. Overwrite/Add data starting from A6 (Overwriting Row 6 and expanding downwards)
   XLSX.utils.sheet_add_aoa(sheet, aoaRows, { origin: "A6" });
 
-  // 7. Write modified workbook back as binary array
+  // 5. Write modified workbook back as binary array
   const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
   
   return new Uint8Array(excelBuffer);

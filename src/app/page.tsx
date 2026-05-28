@@ -626,12 +626,13 @@ export default function TikTokDashboard() {
     }
 
     let ok = true;
-    const firstMain = mainImages[0];
-    if (!firstMain || !firstMain.processed) {
-      ok = await processAllImages();
+    if (mainImages.length > 0) {
+      const firstMain = mainImages[0];
+      if (!firstMain || !firstMain.processed) {
+        ok = await processAllImages();
+      }
+      if (!ok) return;
     }
-
-    if (!ok) return;
 
     setExportLoading(true);
     try {
